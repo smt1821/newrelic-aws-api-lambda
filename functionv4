@@ -1,0 +1,49 @@
+import boto3
+import json
+
+ssm_client = boto3.client('ssm')
+
+INSTANCE_MAPPING = {
+    "MT-TEST-WIN2016": "i-0cca2e61e3dac33fb",
+    "mt-demo-vm2": "i-0971f52241345333b"
+}
+
+def lambda_handler(event, context):
+    print("Received event:", json.dumps(event))
+
+    try:
+        # Decode body from API Gateway event
+        if "body" in event:
+            payload = json.loads(event["body"])
+        else:
+            payload = event  # For direct Lambda testing
+
+        impacted_entities = payload.get("impactedEntities")
+        if not impacted_entities or not isinstance(impacted_entities, list):
+            raise ValueError("Missing or invalid 'impactedEntities'")
+
+        results = []
+        for name in impacted_entities:
+            instance_id = INSTANCE_MAPPING.get(name)
+            if not instance_id:
+                results.append({ "server": name, "error": "Unknown instance" })
+                continue
+
+            response = ssm_client.send_command(
+                InstanceIds=[instance_id],
+                DocumentName="AWS-RunPowerShellScript",
+                Parameters={"commands": ["powershell.exe -File C:\\mt\\restart.ps1"]}
+            )
+            command_id = response['Command']['CommandId']
+            results.append({ "server": name, "command_id": command_id })
+
+        return {
+            "statusCode": 200,
+            "body": json.dumps({ "results": results })
+        }
+
+    except Exception as e:
+        return {
+            "statusCode": 400,
+            "body": json.dumps({ "error": str(e) })
+        }
