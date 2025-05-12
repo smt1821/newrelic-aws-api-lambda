@@ -1,0 +1,51 @@
+import boto3
+import json
+
+# SSM client
+ssm_client = boto3.client('ssm')
+
+# Map friendly server names to EC2 instance IDs
+INSTANCE_MAPPING = {
+    "MT-TEST-WIN2016": "i-0cca2e61e3dac33fb",
+    "mt-demo-vm2": "i-0971f52241345333b"
+}
+
+def lambda_handler(event, context):
+    print("Received event:", json.dumps(event))
+
+    try:
+        # For API Gateway (HTTP API), body is stringified JSON
+        if "body" in event:
+            body = json.loads(event["body"])
+        else:
+            body = event  # fallback for direct Lambda test
+
+        server_name = body.get("server_name", "")
+        if not server_name:
+            raise ValueError("Missing 'server_name' in body")
+
+        instance_id = INSTANCE_MAPPING.get(server_name)
+        if not instance_id:
+            raise ValueError(f"No instance ID found for server name: {server_name}")
+
+        response = ssm_client.send_command(
+            InstanceIds=[instance_id],
+            DocumentName="AWS-RunPowerShellScript",
+            Parameters={"commands": ["powershell.exe -File C:\\mt\\restart.ps1"]}
+        )
+
+        command_id = response['Command']['CommandId']
+
+        return {
+            'statusCode': 200,
+            'body': json.dumps({
+                'message': f'Successfully sent restart command to {instance_id}',
+                'command_id': command_id
+            })
+        }
+
+    except Exception as e:
+        return {
+            'statusCode': 500,
+            'body': json.dumps({'error': str(e)})
+        }
