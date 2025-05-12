@@ -1,0 +1,60 @@
+import boto3
+import json
+
+# Initialize the SSM client
+ssm_client = boto3.client('ssm')
+
+# Mapping of friendly server names to EC2 instance IDs
+INSTANCE_MAPPING = {
+    "MT-TEST-WIN2016": "i-0cca2e61e3dac33fb",
+    "mt-demo-vm2": "i-0971f52241345333b"
+    # Add more if needed
+}
+
+def lambda_handler(event, context):
+    print("Received event:", json.dumps(event))
+
+    try:
+        # Extract server names from New Relic's impactedEntities
+        impacted_entities = event.get("impactedEntities", [])
+
+        if not impacted_entities:
+            raise ValueError("Missing or empty 'impactedEntities' in payload")
+
+        results = []
+        for server_name in impacted_entities:
+            instance_id = INSTANCE_MAPPING.get(server_name)
+            if not instance_id:
+                results.append({
+                    "server_name": server_name,
+                    "status": "failed",
+                    "message": "No matching instance ID found"
+                })
+                continue
+
+            response = ssm_client.send_command(
+                InstanceIds=[instance_id],
+                DocumentName="AWS-RunPowerShellScript",
+                Parameters={
+                    "commands": ["powershell.exe -File C:\\mt\\restart.ps1"]
+                }
+            )
+            command_id = response['Command']['CommandId']
+
+            results.append({
+                "server_name": server_name,
+                "status": "success",
+                "instance_id": instance_id,
+                "command_id": command_id
+            })
+
+        return {
+            'statusCode': 200,
+            'body': json.dumps({"results": results})
+        }
+
+    except Exception as e:
+        return {
+            'statusCode': 500,
+            'body': json.dumps({"error": str(e)})
+        }
